@@ -10,28 +10,35 @@ import firebase_admin
 from firebase_admin import credentials, auth, firestore
 import google.generativeai as genai
 
-# 1. Initialize Firebase Admin SDK safely
+# Debug inspect
 b64_creds = os.getenv("FIREBASE_CREDENTIALS_BASE64")
 raw_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
 cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "serviceAccountKey.json")
 
-if b64_creds:
-    decoded = base64.b64decode(b64_creds).decode("utf-8")
+print(f"DEBUG: b64_creds present? {bool(b64_creds)}")
+print(f"DEBUG: raw_json present? {bool(raw_json)}")
+print(f"DEBUG: cred_path: {cred_path}")
+
+cred = None
+if b64_creds and len(b64_creds.strip()) > 10:
+    decoded = base64.b64decode(b64_creds.strip()).decode("utf-8")
     cred = credentials.Certificate(json.loads(decoded))
-elif raw_json:
-    cred = credentials.Certificate(json.loads(raw_json))
+elif raw_json and len(raw_json.strip()) > 10:
+    cred = credentials.Certificate(json.loads(raw_json.strip()))
 elif os.path.exists(cred_path):
     cred = credentials.Certificate(cred_path)
 elif os.path.exists(f"/etc/secrets/{cred_path}"):
     cred = credentials.Certificate(f"/etc/secrets/{cred_path}")
+elif os.path.exists("/etc/secrets/serviceAccountKey.json"):
+    cred = credentials.Certificate("/etc/secrets/serviceAccountKey.json")
 else:
-    raise RuntimeError("Firebase credentials not found in env or file!")
+    avail_envs = [k for k in os.environ.keys() if "FIREBASE" in k or "KEY" in k]
+    raise RuntimeError(f"Credentials not found! Envs matching: {avail_envs}")
 
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# 2. Configure Gemini API Key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise RuntimeError("CRITICAL: GEMINI_API_KEY environment variable is not set!")
@@ -81,7 +88,7 @@ async def create_journal_entry(data: JournalEntrySchema, user: dict = Depends(ge
     uid = user["uid"]
     model = genai.GenerativeModel(
         model_name="gemini-1.5-flash",
-        system_instruction="You are a reflective personal growth partner. Analyze the journal text. Output strict JSON with keys: summary (string), themes (list of strings), reflectionLabel (one of: Positive, Calm, Reflective, Stressed, Mixed). Informational only, never diagnostic."
+        system_instruction="You are a reflective personal growth partner. Analyze the journal text. Output strict JSON with keys: summary (string), themes (list of strings), reflectionLabel (one of: Positive, Calm, Reflective, Stressed, Mixed)."
     )
     try:
         prompt = f"Analyze this private journal entry:\nTitle: {data.title}\nContent: {data.content}"
@@ -153,7 +160,7 @@ async def chat_with_gemini(data: ChatMessageSchema, user: dict = Depends(get_cur
 
     model = genai.GenerativeModel(
         model_name="gemini-1.5-flash",
-        system_instruction="You are MindVault AI, an empathetic, secure personal journaling assistant. Help users reflect, clarify thoughts, and discover insights without giving medical or diagnostic advice."
+        system_instruction="You are MindVault AI, an empathetic, secure personal journaling assistant."
     )
     chat = model.start_chat(history=history)
     ai_reply = chat.send_message(data.message).text
