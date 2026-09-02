@@ -1,6 +1,5 @@
 import os
 import json
-import base64
 from fastapi import FastAPI, HTTPException, Security, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,35 +9,19 @@ import firebase_admin
 from firebase_admin import credentials, auth, firestore
 import google.generativeai as genai
 
-# Debug inspect
-b64_creds = os.getenv("FIREBASE_CREDENTIALS_BASE64")
-raw_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
-cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "serviceAccountKey.json")
+# 1. Initialize Firebase Admin SDK directly from local bundle
+current_dir = os.path.dirname(os.path.abspath(__file__))
+key_path = os.path.join(current_dir, "serviceAccountKey.json")
 
-print(f"DEBUG: b64_creds present? {bool(b64_creds)}")
-print(f"DEBUG: raw_json present? {bool(raw_json)}")
-print(f"DEBUG: cred_path: {cred_path}")
+if not os.path.exists(key_path):
+    key_path = "serviceAccountKey.json"
 
-cred = None
-if b64_creds and len(b64_creds.strip()) > 10:
-    decoded = base64.b64decode(b64_creds.strip()).decode("utf-8")
-    cred = credentials.Certificate(json.loads(decoded))
-elif raw_json and len(raw_json.strip()) > 10:
-    cred = credentials.Certificate(json.loads(raw_json.strip()))
-elif os.path.exists(cred_path):
-    cred = credentials.Certificate(cred_path)
-elif os.path.exists(f"/etc/secrets/{cred_path}"):
-    cred = credentials.Certificate(f"/etc/secrets/{cred_path}")
-elif os.path.exists("/etc/secrets/serviceAccountKey.json"):
-    cred = credentials.Certificate("/etc/secrets/serviceAccountKey.json")
-else:
-    avail_envs = [k for k in os.environ.keys() if "FIREBASE" in k or "KEY" in k]
-    raise RuntimeError(f"Credentials not found! Envs matching: {avail_envs}")
-
+cred = credentials.Certificate(key_path)
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
+# 2. Configure Gemini API Key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if not GEMINI_API_KEY:
     raise RuntimeError("CRITICAL: GEMINI_API_KEY environment variable is not set!")
