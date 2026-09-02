@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 from fastapi import FastAPI, HTTPException, Security, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,13 +10,16 @@ import firebase_admin
 from firebase_admin import credentials, auth, firestore
 import google.generativeai as genai
 
-# 1. Initialize Firebase Admin SDK (Supports direct JSON string or file path)
-firebase_json_raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+# 1. Initialize Firebase Admin SDK safely
+b64_creds = os.getenv("FIREBASE_CREDENTIALS_BASE64")
+raw_json = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
 cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "serviceAccountKey.json")
 
-if firebase_json_raw:
-    cred_dict = json.loads(firebase_json_raw)
-    cred = credentials.Certificate(cred_dict)
+if b64_creds:
+    decoded = base64.b64decode(b64_creds).decode("utf-8")
+    cred = credentials.Certificate(json.loads(decoded))
+elif raw_json:
+    cred = credentials.Certificate(json.loads(raw_json))
 elif os.path.exists(cred_path):
     cred = credentials.Certificate(cred_path)
 elif os.path.exists(f"/etc/secrets/{cred_path}"):
