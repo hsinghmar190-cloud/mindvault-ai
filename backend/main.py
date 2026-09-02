@@ -9,14 +9,16 @@ import firebase_admin
 from firebase_admin import credentials, auth, firestore
 import google.generativeai as genai
 
-# 1. Initialize Firebase Admin SDK directly from local bundle
-current_dir = os.path.dirname(os.path.abspath(__file__))
-key_path = os.path.join(current_dir, "serviceAccountKey.json")
+# 1. Initialize Firebase Admin SDK
+cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "/etc/secrets/serviceAccountKey.json")
+if not os.path.exists(cred_path):
+    # fallback to local file if path differs
+    cred_path = "serviceAccountKey.json"
 
-if not os.path.exists(key_path):
-    key_path = "serviceAccountKey.json"
+if not os.path.exists(cred_path):
+    raise RuntimeError(f"Service account key not found at: {cred_path}")
 
-cred = credentials.Certificate(key_path)
+cred = credentials.Certificate(cred_path)
 if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 db = firestore.client()
@@ -66,20 +68,33 @@ def health_check():
 async def serve_frontend():
     return FileResponse("../frontend/index.html")
 
+# ----------------- JOURNAL ENDPOINTS -----------------
+
 @app.post("/api/journal")
 async def create_journal_entry(data: JournalEntrySchema, user: dict = Depends(get_current_user)):
     uid = user["uid"]
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction="You are a reflective personal growth partner. Analyze the journal text. Output strict JSON with keys: summary (string), themes (list of strings), reflectionLabel (one of: Positive, Calm, Reflective, Stressed, Mixed)."
+    
+    # Safe model init without system_instruction argument
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    
+    system_prompt = (
+        "You are a reflective personal growth partner. Analyze the journal text.\n"
+        "Return ONLY a JSON object with keys:\n"
+        '\"summary\": a short summary string,\n'
+        '\"themes\": list of topic strings,\n'
+        '\"reflectionLabel\": one of [\"Positive\", \"Calm\", \"Reflective\", \"Stressed\", \"Mixed\"].\n'
+        "Informational only, never medical or diagnostic.\n\n"
     )
+    
     try:
-        prompt = f"Analyze this private journal entry:\nTitle: {data.title}\nContent: {data.content}"
-        ai_resp = model.generate_content(
-            prompt,
-            generation_config={"response_mime_type": "application/json"}
-        )
-        ai_data = json.loads(ai_resp.text)
+        full_prompt = f"{system_prompt}Journal Title: {data.title}\nContent: {data.content}"
+        ai_resp = model.generate_content(full_prompt)
+        text_resp = ai_resp.text.strip()
+        if text_resp.startswith("```json"):
+            text_resp = text_resp[7:-3].strip()
+        elif text_resp.startswith("```"):
+            text_resp = text_resp[3:-3].strip()
+        ai_data = json.loads(text_resp)
     except Exception:
         ai_data = {
             "summary": data.content[:120] + "...",
@@ -98,6 +113,7 @@ async def create_journal_entry(data: JournalEntrySchema, user: dict = Depends(ge
         "updatedAt": firestore.SERVER_TIMESTAMP
     }
     entry_ref.set(payload)
+    
     return {"id": entry_ref.id, "summary": payload["summary"], "reflectionLabel": payload["reflectionLabel"]}
 
 @app.get("/api/journal")
@@ -111,6 +127,7 @@ async def list_journal_entries(user: dict = Depends(get_current_user)):
         .limit(25)
         .stream()
     )
+    
     entries = []
     for doc in docs:
         d = doc.to_dict()
@@ -125,11 +142,18 @@ async def list_journal_entries(user: dict = Depends(get_current_user)):
         })
     return {"entries": entries}
 
+# ----------------- CHAT ENDPOINTS -----------------
+
 @app.post("/api/chat")
 async def chat_with_gemini(data: ChatMessageSchema, user: dict = Depends(get_current_user)):
     uid = user["uid"]
-    conv_id = data.conversation_id or db.collection("users").document(uid).collection("conversations").document().id
-    conv_ref = db.collection("users").document(uid).collection("conversations").document(conv_id)
+    
+    conv_id = data.conversation_id
+    if not conv_id:
+        conv_ref = db.collection("users").document(uid).collection("conversations").document()
+        conv_id = conv_ref.id
+    else:
+        conv_ref = db.collection("users").document(uid).collection("conversations").document(conv_id)
 
     history = []
     if data.enable_memory:
@@ -141,12 +165,9 @@ async def chat_with_gemini(data: ChatMessageSchema, user: dict = Depends(get_cur
                 "parts": [m_data.get("content", "")]
             })
 
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
-        system_instruction="You are MindVault AI, an empathetic, secure personal journaling assistant."
-    )
+    model = genai.GenerativeModel("gemini-1.5-flash")
     chat = model.start_chat(history=history)
-    ai_reply = chat.send_message(data.message).text
+    ai_reply = chat.send_message(f"Assistant Persona: You are MindVault AI, an empathetic personal journaling assistant.\nUser: {data.message}").text
 
     conv_ref.set({"updatedAt": firestore.SERVER_TIMESTAMP, "memoryEnabled": data.enable_memory}, merge=True)
     conv_ref.collection("messages").add({
@@ -159,7 +180,10 @@ async def chat_with_gemini(data: ChatMessageSchema, user: dict = Depends(get_cur
         "content": ai_reply,
         "createdAt": firestore.SERVER_TIMESTAMP
     })
+
     return {"conversation_id": conv_id, "reply": ai_reply}
+
+# ----------------- PRIVACY CENTER -----------------
 
 @app.delete("/api/privacy/clear-all")
 async def delete_all_user_data(user: dict = Depends(get_current_user)):
@@ -169,4 +193,5 @@ async def delete_all_user_data(user: dict = Depends(get_current_user)):
         docs = user_ref.collection(subcol).limit(100).stream()
         for d in docs:
             d.reference.delete()
+            
     return {"status": "success", "message": "All personal journal data permanently deleted."}
