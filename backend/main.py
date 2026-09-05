@@ -81,24 +81,41 @@ async def list_journal_entries(user: dict = Depends(get_current_user)):
     docs = db.collection("users").document(user["uid"]).collection("journalEntries").order_by("createdAt", direction=firestore.Query.DESCENDING).limit(25).stream()
     return {"entries": [{"id": doc.id, **doc.to_dict(), "createdAt": str(doc.to_dict().get("createdAt"))} for doc in docs]}
 
-# --- CHAT ENDPOINTS ---
+# --- CHAT ENDPOINTS (Now with Saving capability) ---
 @app.post("/api/chat")
 async def chat_with_gemini(data: ChatMessageSchema, user: dict = Depends(get_current_user)):
+    uid = user["uid"]
     system_instruction = "You are MindVault AI, a very empathetic, supportive, and motivating journaling companion. You were proudly created by Himanshu Verma."
+    
     try:
         model = genai.GenerativeModel("gemini-3.6-flash")
         ai_reply = model.generate_content(f"{system_instruction}\n\nUser says: {data.message}").text
+        
+        # Save chat to Firestore database
+        chat_ref = db.collection("users").document(uid).collection("chatHistory").document()
+        chat_ref.set({
+            "userMessage": data.message,
+            "aiReply": ai_reply,
+            "timestamp": firestore.SERVER_TIMESTAMP
+        })
+        
     except Exception as e:
         ai_reply = f"API Error: {str(e)}"
     
     return {"reply": ai_reply}
+
+@app.get("/api/chat")
+async def get_chat_history(user: dict = Depends(get_current_user)):
+    uid = user["uid"]
+    docs = db.collection("users").document(uid).collection("chatHistory").order_by("timestamp", direction=firestore.Query.ASCENDING).limit(50).stream()
+    return {"history": [{"id": doc.id, **doc.to_dict(), "timestamp": str(doc.to_dict().get("timestamp"))} for doc in docs]}
 
 # --- PRIVACY ENDPOINT ---
 @app.delete("/api/privacy/clear-all")
 async def delete_all_user_data(user: dict = Depends(get_current_user)):
     uid = user["uid"]
     user_ref = db.collection("users").document(uid)
-    for subcol in ["journalEntries", "conversations"]:
+    for subcol in ["journalEntries", "chatHistory", "conversations"]:
         docs = user_ref.collection(subcol).limit(100).stream()
         for d in docs:
             d.reference.delete()
