@@ -1,7 +1,7 @@
 import os
 import json
 import base64
-from fastapi import FastAPI, HTTPException, Security, Depends, status
+from fastapi import FastAPI, HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -55,19 +55,6 @@ class ChatMessageSchema(BaseModel):
 async def serve_frontend():
     return FileResponse("../frontend/index.html")
 
-# --- AUTO-DETECT MODEL FUNCTION ---
-def get_ai_model():
-    try:
-        # Google सर्वर से चालू मॉडल्स की लिस्ट मांगता है
-        valid_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        preferred = [m for m in valid_models if '1.5' in m]
-        model_name = preferred[0] if preferred else valid_models[0]
-        model_name = model_name.replace("models/", "")
-        return genai.GenerativeModel(model_name)
-    except Exception as e:
-        print(f"Model Fetch Error: {e}")
-        return genai.GenerativeModel("gemini-1.5-flash")
-
 # --- JOURNAL ENDPOINTS ---
 @app.post("/api/journal")
 async def create_journal_entry(data: JournalEntrySchema, user: dict = Depends(get_current_user)):
@@ -75,7 +62,7 @@ async def create_journal_entry(data: JournalEntrySchema, user: dict = Depends(ge
     system_prompt = "Return JSON with keys: summary, themes, reflectionLabel (Positive, Calm, Reflective, Stressed, Mixed)."
     
     try:
-        model = get_ai_model()
+        model = genai.GenerativeModel("gemini-3.6-flash")
         resp = model.generate_content(f"{system_prompt}\nTitle: {data.title}\nContent: {data.content}").text.strip()
         if resp.startswith("```json"): resp = resp[7:-3].strip()
         elif resp.startswith("```"): resp = resp[3:-3].strip()
@@ -99,7 +86,7 @@ async def list_journal_entries(user: dict = Depends(get_current_user)):
 async def chat_with_gemini(data: ChatMessageSchema, user: dict = Depends(get_current_user)):
     system_instruction = "You are MindVault AI, a very empathetic, supportive, and motivating journaling companion."
     try:
-        model = get_ai_model()
+        model = genai.GenerativeModel("gemini-3.6-flash")
         ai_reply = model.generate_content(f"{system_instruction}\n\nUser says: {data.message}").text
     except Exception as e:
         ai_reply = f"API Error: {str(e)}"
