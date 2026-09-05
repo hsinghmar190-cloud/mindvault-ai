@@ -10,7 +10,7 @@ import firebase_admin
 from firebase_admin import credentials, auth, firestore
 import google.generativeai as genai
 
-# 1. Initialize Firebase Admin SDK
+# 1. Initialize Firebase
 base64_cred = os.getenv("FIREBASE_CREDENTIALS_BASE64")
 cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH", "/etc/secrets/serviceAccountKey.json")
 
@@ -28,7 +28,7 @@ if not firebase_admin._apps:
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
-# 2. Configure Gemini API
+# 2. Configure Gemini
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 genai.configure(api_key=GEMINI_API_KEY)
 
@@ -55,21 +55,34 @@ class ChatMessageSchema(BaseModel):
 async def serve_frontend():
     return FileResponse("../frontend/index.html")
 
+# --- AUTO-DETECT MODEL FUNCTION ---
+def get_ai_model():
+    try:
+        # Google सर्वर से चालू मॉडल्स की लिस्ट मांगता है
+        valid_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        preferred = [m for m in valid_models if '1.5' in m]
+        model_name = preferred[0] if preferred else valid_models[0]
+        model_name = model_name.replace("models/", "")
+        return genai.GenerativeModel(model_name)
+    except Exception as e:
+        print(f"Model Fetch Error: {e}")
+        return genai.GenerativeModel("gemini-1.5-flash")
+
 # --- JOURNAL ENDPOINTS ---
 @app.post("/api/journal")
 async def create_journal_entry(data: JournalEntrySchema, user: dict = Depends(get_current_user)):
     uid = user["uid"]
-    model = genai.GenerativeModel("gemini-pro")
     system_prompt = "Return JSON with keys: summary, themes, reflectionLabel (Positive, Calm, Reflective, Stressed, Mixed)."
     
     try:
+        model = get_ai_model()
         resp = model.generate_content(f"{system_prompt}\nTitle: {data.title}\nContent: {data.content}").text.strip()
         if resp.startswith("```json"): resp = resp[7:-3].strip()
         elif resp.startswith("```"): resp = resp[3:-3].strip()
         ai_data = json.loads(resp)
     except Exception as e:
         print(f"Journal AI Error: {e}")
-        ai_data = {"summary": data.content[:100], "themes": ["Reflection"], "reflectionLabel": "Reflective"}
+        ai_data = {"summary": f"Fallback Saved. Error: {str(e)[:50]}", "themes": ["Reflection"], "reflectionLabel": "Reflective"}
 
     entry_ref = db.collection("users").document(uid).collection("journalEntries").document()
     payload = {"title": data.title, "content": data.content, "summary": ai_data.get("summary", ""), "reflectionLabel": ai_data.get("reflectionLabel", "Reflective"), "createdAt": firestore.SERVER_TIMESTAMP}
@@ -84,9 +97,9 @@ async def list_journal_entries(user: dict = Depends(get_current_user)):
 # --- CHAT ENDPOINTS ---
 @app.post("/api/chat")
 async def chat_with_gemini(data: ChatMessageSchema, user: dict = Depends(get_current_user)):
-    model = genai.GenerativeModel("gemini-pro")
     system_instruction = "You are MindVault AI, a very empathetic, supportive, and motivating journaling companion."
     try:
+        model = get_ai_model()
         ai_reply = model.generate_content(f"{system_instruction}\n\nUser says: {data.message}").text
     except Exception as e:
         ai_reply = f"API Error: {str(e)}"
