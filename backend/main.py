@@ -59,7 +59,7 @@ async def serve_frontend():
 @app.post("/api/journal")
 async def create_journal_entry(data: JournalEntrySchema, user: dict = Depends(get_current_user)):
     uid = user["uid"]
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-1.5-flash-latest")
     system_prompt = "Return JSON with keys: summary, themes, reflectionLabel (Positive, Calm, Reflective, Stressed, Mixed)."
     
     try:
@@ -83,7 +83,7 @@ async def list_journal_entries(user: dict = Depends(get_current_user)):
 # --- CHAT ENDPOINTS ---
 @app.post("/api/chat")
 async def chat_with_gemini(data: ChatMessageSchema, user: dict = Depends(get_current_user)):
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-1.5-flash-latest")
     system_instruction = "You are MindVault AI, a very empathetic, supportive, and motivating journaling companion."
     try:
         ai_reply = model.generate_content(f"{system_instruction}\n\nUser says: {data.message}").text
