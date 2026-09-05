@@ -84,7 +84,7 @@ async def list_journal_entries(user: dict = Depends(get_current_user)):
 # --- CHAT ENDPOINTS ---
 @app.post("/api/chat")
 async def chat_with_gemini(data: ChatMessageSchema, user: dict = Depends(get_current_user)):
-    system_instruction = "You are MindVault AI, a very empathetic, supportive, and motivating journaling companion."
+    system_instruction = "You are MindVault AI, a very empathetic, supportive, and motivating journaling companion. You were proudly created by Himanshu Verma."
     try:
         model = genai.GenerativeModel("gemini-3.6-flash")
         ai_reply = model.generate_content(f"{system_instruction}\n\nUser says: {data.message}").text
