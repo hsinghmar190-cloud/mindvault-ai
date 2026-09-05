@@ -59,7 +59,7 @@ async def serve_frontend():
 @app.post("/api/journal")
 async def create_journal_entry(data: JournalEntrySchema, user: dict = Depends(get_current_user)):
     uid = user["uid"]
-    model = genai.GenerativeModel("gemini-1.5-flash-latest")
+    model = genai.GenerativeModel("gemini-pro")
     system_prompt = "Return JSON with keys: summary, themes, reflectionLabel (Positive, Calm, Reflective, Stressed, Mixed)."
     
     try:
@@ -67,7 +67,8 @@ async def create_journal_entry(data: JournalEntrySchema, user: dict = Depends(ge
         if resp.startswith("```json"): resp = resp[7:-3].strip()
         elif resp.startswith("```"): resp = resp[3:-3].strip()
         ai_data = json.loads(resp)
-    except:
+    except Exception as e:
+        print(f"Journal AI Error: {e}")
         ai_data = {"summary": data.content[:100], "themes": ["Reflection"], "reflectionLabel": "Reflective"}
 
     entry_ref = db.collection("users").document(uid).collection("journalEntries").document()
@@ -83,12 +84,12 @@ async def list_journal_entries(user: dict = Depends(get_current_user)):
 # --- CHAT ENDPOINTS ---
 @app.post("/api/chat")
 async def chat_with_gemini(data: ChatMessageSchema, user: dict = Depends(get_current_user)):
-    model = genai.GenerativeModel("gemini-1.5-flash-latest")
+    model = genai.GenerativeModel("gemini-pro")
     system_instruction = "You are MindVault AI, a very empathetic, supportive, and motivating journaling companion."
     try:
         ai_reply = model.generate_content(f"{system_instruction}\n\nUser says: {data.message}").text
     except Exception as e:
-        ai_reply = "I'm here to listen, but I'm having a little trouble connecting to my brain right now."
+        ai_reply = f"API Error: {str(e)}"
     
     return {"reply": ai_reply}
 
