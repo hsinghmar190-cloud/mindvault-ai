@@ -10,7 +10,7 @@ This application is fully production-ready and its architecture is specifically 
 
 Rather than giving up, I have hosted a **100% functional live mirror on Render** so you can seamlessly evaluate the prototype, UI, and backend integration. 
 
-**Live Demo URL:** [Insert Your Render Link Here]
+**Live Demo URL:** [https://mindvault-ai-gpnx.onrender.com]
 
 If billing were activated, the exact deployment command with the mandatory Ideathon label used would be:
 ```bash
